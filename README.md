@@ -1,145 +1,151 @@
-# Chorvam.uz — отобранные фрагменты кода
+# Chorvam.uz — kod namunalari
 
-Chorvam.uz — платформа для рынка скота в Узбекистане: Telegram Mini App и веб.
-Продукт в разработке, кодовая база закрыта. Здесь — небольшая выборка, показывающая,
-**как мы решаем инженерные задачи**, а не что именно мы строим.
+*[Русская версия](README.ru.md)*
 
-Три истории, каждая с доказательством. Все фрагменты — рабочий код из продукта.
+Chorvam.uz — O'zbekistondagi chorva bozori uchun platforma: Telegram Mini App va veb.
+Mahsulot ishlab chiqilmoqda, kod bazasi yopiq. Bu yerda kichik tanlanma keltirilgan —
+u **muhandislik masalalarini qanday hal qilishimizni** ko'rsatadi, nimani qurayotganimizni emas.
+
+Uchta hikoya, har biri isbot bilan. Barcha parchalar — mahsulotdagi ishlaydigan kod.
 
 ```
-npm install && npm test        # 15 тестов, ~2 секунды
+npm install && npm test        # 15 ta test, ~2 soniya
 ```
 
 ---
 
-## 1. Уведомление о деньгах не может потеряться
+## 1. Pul haqidagi bildirishnoma yo'qolishi mumkin emas
 
-**Что было.** Внешний канал доставки недоступен — сообщение пишется в лог уровнем
-`warn`, и на этом всё. Человек не получает уведомление о своём платеже, а
-восстановить это нечем: в логе строка, в системе ничего.
+**Nima bo'lgan edi.** Tashqi yetkazish kanali ishlamay qoladi — xabar logga `warn`
+darajasida yoziladi va shu bilan tamom. Odam o'z to'lovi haqida bildirishnoma olmaydi,
+uni tiklashning esa iloji yo'q: logda bir qator, tizimda hech nima.
 
-Ошибка была не в том, что канал упал — он упадёт всегда. Ошибка в том, что
-**лог рапортовал успех**: код отработал без исключения, метрика «отправлено»
-выросла, до человека не дошло ничего.
+Xato kanalning ishlamay qolishida emas edi — u har doim ishdan chiqadi. Xato shundaki,
+**log muvaffaqiyat haqida hisobot berardi**: kod istisnosiz ishlab tugadi, «yuborildi»
+ko'rsatkichi o'sdi, odamga esa hech nima yetib bormadi.
 
-**Что сделали.** Очередь с состоянием: `PENDING → SENT | FAILED`, попытки,
-текст последней ошибки, время следующей попытки.
+**Nima qildik.** Holatga ega navbat: `PENDING → SENT | FAILED`, urinishlar soni,
+oxirgi xatoning matni, keyingi urinish vaqti.
 
-- [`src/reliable-delivery/outbox.entity.ts`](src/reliable-delivery/outbox.entity.ts) — модель
-- [`src/reliable-delivery/retry-policy.ts`](src/reliable-delivery/retry-policy.ts) — когда повторять и когда сдаться
-- [`src/reliable-delivery/retry-worker.ts`](src/reliable-delivery/retry-worker.ts) — повтор по расписанию
+- [`src/reliable-delivery/outbox.entity.ts`](src/reliable-delivery/outbox.entity.ts) — model
+- [`src/reliable-delivery/retry-policy.ts`](src/reliable-delivery/retry-policy.ts) — qachon takrorlash va qachon to'xtash
+- [`src/reliable-delivery/retry-worker.ts`](src/reliable-delivery/retry-worker.ts) — jadval bo'yicha takrorlash
 
-**Два решения, которые стоит заметить:**
+**E'tiborga loyiq ikkita yechim:**
 
-Пауза растёт вдвое (1, 2, 4… минуты, потолок час). Типичная причина сбоя —
-перезапуск принимающей стороны, он занимает секунды: первый повтор должен быть
-быстрым, чтобы человек ничего не заметил. Но если канал лежит всерьёз, долбить его
-раз в минуту — мешать ему встать.
+Pauza ikki barobar o'sadi (1, 2, 4… daqiqa, eng ko'pi bir soat). Nosozlikning odatiy
+sababi — qabul qiluvchi tomonning qayta ishga tushishi, bu bir necha soniya davom etadi:
+birinchi takror tez bo'lishi kerak, toki odam hech narsani sezmasin. Ammo kanal jiddiy
+ishdan chiqqan bo'lsa, uni har daqiqada urish — tiklanishiga xalaqit berish demakdir.
 
-После восьми попыток запись переходит в `FAILED` и **остаётся видимой**. Сдаться
-можно, потерять нельзя: по этому статусу строится сводка «не доставлено N»,
-которую видит человек.
+Sakkizta urinishdan so'ng yozuv `FAILED` holatiga o'tadi va **ko'rinib turaveradi**.
+Taslim bo'lish mumkin, yo'qotish mumkin emas: aynan shu holat bo'yicha odam ko'radigan
+«N ta yetkazilmadi» hisoboti quriladi.
 
-**Доказательство:** [`tests/retry-policy.spec.ts`](tests/retry-policy.spec.ts) — 7 тестов,
-включая проверку, что весь цикл повторов укладывается примерно в два часа. Держать
-человека в неведении дольше нельзя: дальше нужен не повтор, а разбор.
+**Isbot:** [`tests/retry-policy.spec.ts`](tests/retry-policy.spec.ts) — 7 ta test, shu
+jumladan takrorlash tsikli taxminan ikki soatga sig'ishini tekshiruvchi test. Odamni
+bundan uzoqroq xabarsiz qoldirib bo'lmaydi: undan keyin takror emas, tahlil kerak.
 
 ---
 
-## 2. Человек не должен узнавать об изменении своей суммы из выписки
+## 2. Odam o'z summasi o'zgarganini bank ko'chirmasidan bilmasligi kerak
 
-**Что было.** Начисления неделимы: каждое — закрытая сделка, «половину сделки»
-вывести нельзя. Поэтому запрошенная сумма не всегда набирается точно.
+**Nima bo'lgan edi.** Hisoblangan summalar bo'linmaydi: har biri — yopilgan bitim,
+«bitimning yarmini» yechib bo'lmaydi. Shu sababli so'ralgan summa har doim ham aniq
+to'planavermaydi.
 
-Запрос на 349 090 000 при доступных 348 090 000 **молча создавал заявку на меньшую
-сумму**. Экран честно писал «заявка принята» — принята была другая. Ничего не падало,
-никакой ошибки в логах.
+348 090 000 mavjud bo'lganda 349 090 000 so'ralsa, tizim **jimgina kichikroq summaga
+ariza yaratardi**. Ekran esa halol qilib «ariza qabul qilindi» deb yozardi — qabul
+qilingani boshqa ariza edi. Hech nima ishdan chiqmasdi, loglarda hech qanday xato yo'q edi.
 
-Отдельно неприятно, что рядом, в проверке минимальной суммы, то же самое правило вело
-себя правильно: отказывало и объясняло цифрами. Одно правило, две реализации,
-разное поведение — это класс дефекта, который мы у себя ловили не раз.
+Alohida yoqimsiz jihati: yonginasida, eng kam summa tekshiruvida xuddi shu qoida to'g'ri
+ishlardi — rad etardi va raqamlar bilan tushuntirardi. Bitta qoida, ikkita amalga oshirish,
+turlicha xatti-harakat — bu biz o'zimizda bir necha marta uchratgan nuqson turi.
 
-**Что сделали.** Расхождение больше не проглатывается: заявка либо на ту сумму,
-которую назвал человек, либо её нет вовсе — с объяснением, что именно набирается
-и что делать.
+**Nima qildik.** Nomuvofiqlik endi yutib yuborilmaydi: ariza yo odam aytgan summaga
+tuziladi, yo umuman tuzilmaydi — aynan qancha to'planishi va nima qilish kerakligi
+tushuntirilgan holda.
 
 - [`src/payouts/accrual-selection.ts`](src/payouts/accrual-selection.ts)
 
-**Доказательство:** [`tests/accrual-selection.spec.ts`](tests/accrual-selection.spec.ts) — 8 тестов,
-включая тот самый случай с 349 090 000 и проверку, что в тексте отказа есть **оба**
-числа: доступное и набираемое. Одного человеку недостаточно, чтобы понять, что делать.
+**Isbot:** [`tests/accrual-selection.spec.ts`](tests/accrual-selection.spec.ts) — 8 ta test,
+shu jumladan o'sha 349 090 000 holati va rad javobida **ikkala** raqam — mavjud va
+to'planadigan summa — borligini tekshirish. Odamga nima qilishni tushunish uchun bittasi
+yetarli emas.
 
 ---
 
-## 3. Проверяем то, что видит человек, а не то, что ответил сервер
+## 3. Serverning javobini emas, odam ko'rgan narsani tekshiramiz
 
-Дефекты, которые API-проверки пропускают целиком:
+API tekshiruvlari butunlay o'tkazib yuboradigan nuqsonlar:
 
-- сервер отвечает `200 OK` и меняет статус в базе, а кнопка на экране неактивна —
-  с точки зрения API успех, с точки зрения человека функция не работает;
-- две суммы складываются строкой, и вместо `550 000` на экране `300 000 250 000` —
-  ни одного исключения, ни одной записи в логе;
-- список пуст не потому, что данных нет, а потому что загрузка упала — пустое
-  состояние маскирует падение.
+- server `200 OK` javob beradi va bazada holatni o'zgartiradi, ekrandagi tugma esa
+  faolsiz qolaveradi — API nuqtai nazaridan muvaffaqiyat, odam nuqtai nazaridan
+  funksiya ishlamaydi;
+- ikkita summa satr sifatida qo'shiladi va `550 000` o'rniga ekranda `300 000 250 000`
+  paydo bo'ladi — na bitta istisno, na logda bitta yozuv;
+- ro'yxat bo'sh, lekin ma'lumot yo'qligidan emas, yuklash ishdan chiqqanidan —
+  bo'sh holat qulashni yashiradi.
 
-**Правило фреймворка:** доказательством работы считается только то, что видно на
-экране. API вызывается ровно дважды — узнать состояние **до** и убрать фикстуры
-**после**, — и ни разу для вывода «работает».
+**Freymvork qoidasi:** ishlayotganining isboti deb faqat ekranda ko'ringan narsa
+hisoblanadi. API roppa-rosa ikki marta chaqiriladi — holatni **oldin** bilish va
+fiksturalarni **keyin** tozalash uchun, — va hech qachon «ishlayapti» degan xulosa uchun emas.
 
-- [`browser-checks/base.py`](browser-checks/base.py) — прогон, шаги, скриншот при падении
-- [`browser-checks/helpers.py`](browser-checks/helpers.py) — поиск по роли и подписи, а не по CSS-классу
-- [`browser-checks/example_scenario.py`](browser-checks/example_scenario.py) — сценарий целиком
+- [`browser-checks/base.py`](browser-checks/base.py) — bosqichlar, qulaganda skrinshot
+- [`browser-checks/helpers.py`](browser-checks/helpers.py) — CSS-klass bo'yicha emas, rol va yozuv bo'yicha qidiruv
+- [`browser-checks/example_scenario.py`](browser-checks/example_scenario.py) — to'liq stsenariy
 
-Упавший шаг не прерывает сценарий: одна сломанная кнопка не должна прятать состояние
-остальных десяти, иначе каждый прогон чинит по одному дефекту за раз.
+Qulagan bosqich stsenariyni to'xtatmaydi: bitta buzilgan tugma qolgan o'ntasining
+holatini yashirmasligi kerak, aks holda har bir tekshiruv bittadan nuqson tuzatadi.
 
 ---
 
-## Дополнительно: какой билд сейчас отвечает
+## Qo'shimcha: hozir qaysi build javob bermoqda
 
-За два дня тестирование трижды проверило процесс со старым кодом, а на прод чуть не
-уехал сервис, который никто не пересобрал. Отличить живой процесс от нужного было
-нечем: снаружи оба отвечают одинаково и одинаково бодро.
+Ikki kun ichida testlash uch marta eski koddagi jarayonni tekshirdi, prodga esa hech kim
+qayta yig'magan servis chiqib ketishiga oz qoldi. Ishlayotgan jarayonni keraklisidan
+ajratishning imkoni yo'q edi: tashqaridan ikkalasi bir xil va bir xil ishonchli javob beradi.
 
-`GET /health` возвращает коммит, ветку и время сборки — первым запросом любой проверки.
+`GET /health` commit, branch va yig'ilish vaqtini qaytaradi — har qanday tekshiruvning
+birinchi so'rovi.
 
 - [`src/build-identity/health.controller.ts`](src/build-identity/health.controller.ts)
 - [`src/build-identity/write-build-info.js`](src/build-identity/write-build-info.js)
 
-Тонкость, ради которой всё и делалось: снимок пишется **после** сборки и лежит рядом
-с ней. Читать git в момент запроса нельзя — тогда `/health` показывал бы коммит
-рабочего дерева, пока процесс крутит старую сборку, и врал бы ровно в том случае,
-ради которого заведён.
+Butun ish shu nozik jihat uchun qilingan: ma'lumot build'dan **keyin** yoziladi va
+uning yonida yotadi. Git'ni so'rov paytida o'qib bo'lmaydi — u holda `/health` ishchi
+katalogdagi commit'ni ko'rsatardi, jarayon esa eski build'da ishlab turardi, ya'ni
+aynan o'zi uchun yaratilgan holatda yolg'on gapirardi.
 
 ---
 
-## О происхождении кода
+## Kod qayerdan olingan
 
-Фрагменты взяты из работающего продукта. Изменено ровно два вида вещей:
+Parchalar ishlaydigan mahsulotdan olingan. Faqat ikki xil narsa o'zgartirilgan:
 
-1. **Имена, привязанные к каналу доставки** (`telegramId` → `recipientId`) и внутренние
-   номера задач — чтобы читать можно было без нашего трекера.
-2. **Политика повторов и набор начислений вынесены в отдельные модули.** В продукте
-   они живут внутри сервисов, вместе с транзакцией базы. Здесь отделены от
-   инфраструктуры, чтобы правило можно было проверить тестами без базы и без сети.
-   Сама логика и тексты ошибок не изменены.
+1. **Yetkazish kanaliga bog'liq nomlar** (`telegramId` → `recipientId`) va ichki vazifa
+   raqamlari — kodni bizning treker'imizsiz o'qish mumkin bo'lishi uchun.
+2. **Takrorlash siyosati va hisoblanmalarni tanlash alohida modullarga ajratilgan.**
+   Mahsulotda ular servislar ichida, baza tranzaksiyasi bilan birga yashaydi. Bu yerda
+   infratuzilmadan ajratilgan — qoidani bazasiz va tarmoqsiz testlar bilan tekshirish
+   mumkin bo'lsin deb. Mantiq va xato matnlari o'zgartirilmagan.
 
-Ничего не переписано «для красоты»: комментарии в коде — те же, что в продукте,
-вместе с описанием дефектов, из которых эти решения выросли.
+Hech nima «chiroyli ko'rinsin» deb qayta yozilmagan: koddagi izohlar mahsulotdagi bilan
+bir xil, shu jumladan bu yechimlar o'sib chiqqan nuqsonlarning tavsifi ham.
 
-## Чего здесь намеренно нет
+## Bu yerda ataylab yo'q narsalar
 
-- бизнес-правила и пороги, на которых держится продукт;
-- модель комиссий и распределения денег между участниками;
-- интеграции с платёжными системами;
-- логика ролей и прав доступа;
-- инвестиционная часть.
+- mahsulot asosidagi biznes-qoidalar va chegaralar;
+- komissiya modeli va pulning ishtirokchilar o'rtasida taqsimlanishi;
+- to'lov tizimlari bilan integratsiyalar;
+- rollar va kirish huquqlari mantiqi;
+- investitsiya qismi.
 
-Это не небрежность отбора: перечисленное составляет суть продукта, и открытая
-публикация означала бы отдать её целиком. Готовы показать любой из этих модулей
-при личной встрече.
+Bu tanlashdagi e'tiborsizlik emas: sanab o'tilganlar mahsulotning mohiyatini tashkil
+qiladi va ochiq nashr etish uni butunlay berib yuborish degani bo'lardi. Bu modullarning
+istalganini shaxsiy uchrashuvda ko'rsatishga tayyormiz.
 
-## Лицензия
+## Litsenziya
 
-Код опубликован для ознакомления в рамках конкурсной заявки. Все права сохранены —
-см. [LICENSE](LICENSE).
+Kod tanlov arizasi doirasida faqat tanishish uchun nashr etilgan. Barcha huquqlar
+himoyalangan — [LICENSE](LICENSE) ga qarang.
