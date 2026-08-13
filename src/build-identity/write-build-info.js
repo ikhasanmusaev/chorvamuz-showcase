@@ -4,15 +4,15 @@ const { writeFileSync, mkdirSync } = require('fs');
 const { join } = require('path');
 
 /**
- * Снимок сборки рядом с самой сборкой.
+ * A snapshot of the build, stored next to the build itself.
  *
- * Пишется ПОСЛЕ компиляции, в dist. Это принципиально: если читать git
- * в момент запроса, health покажет коммит рабочего дерева — то есть новый
- * код, — пока процесс крутит старую сборку. Ровно та ошибка, ради которой
- * эндпоинт и делается.
+ * Written AFTER compilation, into dist. That ordering is the point: if git were
+ * read at request time, health would report the working tree's commit — the new
+ * code — while the process runs an older build. Exactly the mistake this endpoint
+ * exists to prevent.
  *
- * Файл лежит в dist и умирает вместе с ним: пересобрал — обновился,
- * не пересобрал — остался прежним, честно показывая, что крутится.
+ * The file lives in dist and dies with it: rebuild and it updates, skip the
+ * rebuild and it stays as it was, honestly reporting what is actually running.
  */
 function git(command, fallback = 'unknown') {
   try {
@@ -20,8 +20,8 @@ function git(command, fallback = 'unknown') {
       .toString()
       .trim();
   } catch {
-    // На проде исходников и .git может не быть — это нормально,
-    // тогда значение подставит CI через переменные окружения
+    // In production there may be no sources and no .git — that is expected;
+    // in that case CI supplies the values through environment variables
     return fallback;
   }
 }
@@ -37,4 +37,4 @@ const distDir = join(__dirname, '..', 'dist');
 mkdirSync(distDir, { recursive: true });
 writeFileSync(join(distDir, 'build-info.json'), JSON.stringify(info, null, 2));
 
-console.log(`build-info: commit ${info.commit} (${info.branch}), собрано ${info.builtAt}`);
+console.log(`build-info: commit ${info.commit} (${info.branch}), built at ${info.builtAt}`);

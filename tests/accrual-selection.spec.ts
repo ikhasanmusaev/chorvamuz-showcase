@@ -5,59 +5,59 @@ const MIN = 50_000;
 const accruals = (...amounts: number[]) =>
   amounts.map((amount, i) => ({ id: `t${i}`, amount }));
 
-describe('вывод всего доступного', () => {
-  it('без указанной суммы забирает все начисления', () => {
+describe('withdrawing everything available', () => {
+  it('takes all accruals when no amount is given', () => {
     const result = selectAccruals(accruals(1_000_000, 2_000_000, 500_000), undefined, MIN);
 
     expect(result.sum).toBe(3_500_000);
     expect(result.chosen).toHaveLength(3);
   });
 
-  it('пустой список — это отказ, а не заявка на ноль', () => {
-    expect(() => selectAccruals([], undefined, MIN)).toThrow(/Нет начислений/);
+  it('an empty list is a refusal, not a request for zero', () => {
+    expect(() => selectAccruals([], undefined, MIN)).toThrow(/Nothing accrued/);
   });
 });
 
-describe('запрошена конкретная сумма', () => {
-  it('набирается точно — заявка проходит', () => {
+describe('a specific amount was requested', () => {
+  it('adds up exactly — the request goes through', () => {
     const result = selectAccruals(accruals(1_000_000, 2_000_000), 3_000_000, MIN);
 
     expect(result.sum).toBe(3_000_000);
   });
 
-  it('не набирается точно — отказ с цифрами, а не молчаливая подмена', () => {
-    // Тот самый случай: просили 349 090 000, доступно 348 090 000.
-    // Раньше здесь молча создавалась заявка на меньшую сумму
+  it('does not add up — refusal with numbers, not a silent substitution', () => {
+    // The exact case: 349,090,000 requested, 348,090,000 available.
+    // This used to silently create a request for the smaller amount
     expect(() => selectAccruals(accruals(348_090_000), 349_090_000, MIN)).toThrow(
-      /целыми начислениями набирается 348090000/,
+      /whole accruals add up to 348090000/,
     );
   });
 
-  it('в тексте отказа есть и доступное, и набираемое — человеку нужны оба числа', () => {
+  it('the refusal names both numbers — the person needs each of them', () => {
     try {
       selectAccruals(accruals(300_000, 250_000), 400_000, MIN);
-      fail('ожидался отказ');
+      fail('expected a refusal');
     } catch (err) {
       expect((err as Error).message).toContain('550000');
       expect((err as Error).message).toContain('300000');
     }
   });
 
-  it('запрошено меньше самого мелкого начисления — объясняем неделимость', () => {
+  it('less than the smallest accrual — we explain indivisibility', () => {
     expect(() => selectAccruals(accruals(1_000_000), 400_000, MIN)).toThrow(
-      /не дробятся: минимальное составляет 1000000/,
+      /indivisible: the smallest one is 1000000/,
     );
   });
 });
 
-describe('минимальная сумма вывода', () => {
-  it('ниже минимума — отказ', () => {
+describe('minimum withdrawal amount', () => {
+  it('below the minimum — refused', () => {
     expect(() => selectAccruals(accruals(10_000), undefined, MIN)).toThrow(
-      /Минимальная сумма вывода — 50000/,
+      /Minimum withdrawal is 50000/,
     );
   });
 
-  it('ровно минимум — проходит', () => {
+  it('exactly the minimum — allowed', () => {
     expect(selectAccruals(accruals(MIN), undefined, MIN).sum).toBe(MIN);
   });
 });

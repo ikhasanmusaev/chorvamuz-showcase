@@ -1,36 +1,36 @@
 /**
- * Политика повторов для очереди уведомлений.
+ * Retry policy for the notification queue.
  *
- * Вынесена в отдельный модуль сознательно: это единственная часть доставки,
- * которую можно проверить без базы и без сети, а ошибиться в ней проще всего.
- * Смотри `tests/retry-policy.spec.ts` — там она и проверяется.
+ * Deliberately kept in its own module: this is the only part of delivery that can
+ * be verified without a database and without a network, and the easiest part to
+ * get wrong. See `tests/retry-policy.spec.ts`, where it is verified.
  */
 
 /**
- * Сколько раз пробуем, прежде чем позвать человека.
+ * How many times we try before calling a human.
  *
- * Восемь попыток с растущей паузой — это чуть больше часа. Дальше повторять
- * бессмысленно: если канал недоступен час, это не сетевая икота, а поломка,
- * и нужен не девятый запрос, а живой человек.
+ * Eight attempts with a growing delay is a little over an hour. Retrying past that
+ * is pointless: if the channel has been unavailable for an hour it is not a network
+ * hiccup but a breakage, and what is needed is not a ninth request but a person.
  */
 export const MAX_ATTEMPTS = 8;
 
-/** Дольше часа не ждём: сообщение о деньгах, устаревшее на два часа, уже бесполезно */
+/** Never wait longer than an hour: a message about money that is two hours late is already useless */
 export const MAX_BACKOFF_MINUTES = 60;
 
 /**
- * Пауза перед следующей попыткой: 1, 2, 4, 8… минуты, но не дольше часа.
+ * Delay before the next attempt: 1, 2, 4, 8… minutes, capped at an hour.
  *
- * Экспонента, а не фиксированный интервал: типичная причина сбоя —
- * перезапуск или деплой принимающей стороны, он занимает секунды. Первый
- * повтор должен быть быстрым, чтобы человек ничего не заметил. Но если
- * канал лежит всерьёз, долбить его раз в минуту — значит мешать ему встать.
+ * Exponential rather than a fixed interval: the typical cause of failure is a
+ * restart or a deploy on the receiving side, which takes seconds. The first retry
+ * has to be fast so the user never notices. But if the channel is genuinely down,
+ * hammering it once a minute keeps it from coming back up.
  */
 export function backoffMinutes(attempts: number): number {
   return Math.min(MAX_BACKOFF_MINUTES, 2 ** Math.max(0, attempts - 1));
 }
 
-/** Результат обработки одной попытки — что записать в строку очереди */
+/** Outcome of one attempt — what to write back to the queue row */
 export interface NextState {
   status: 'PENDING' | 'FAILED';
   attempts: number;
@@ -38,18 +38,18 @@ export interface NextState {
 }
 
 /**
- * Куда переходит запись после неудачной попытки.
+ * Where a row goes after a failed attempt.
  *
- * Отдельная чистая функция, а не `if` внутри цикла воркера: именно здесь
- * живёт правило «когда сдаться», и оно должно быть проверяемым в отрыве
- * от базы, транспорта и планировщика.
+ * A pure function rather than an `if` inside the worker loop: this is where the
+ * "when to give up" rule lives, and it has to be verifiable in isolation from the
+ * database, the transport and the scheduler.
  */
 export function nextStateAfterFailure(currentAttempts: number): NextState {
   const attempts = currentAttempts + 1;
 
   if (attempts >= MAX_ATTEMPTS) {
-    // Не «ещё разок»: столько попыток за час — это уже не сеть,
-    // и запись должна остаться видимой, а не молча уйти в следующий круг
+    // Not "one more time": this many attempts within an hour is no longer a network
+    // problem, and the row has to stay visible instead of quietly going round again
     return { status: 'FAILED', attempts, nextAttemptInMinutes: null };
   }
 

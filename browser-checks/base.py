@@ -9,10 +9,9 @@ from __future__ import annotations
 import time
 import traceback
 from dataclasses import dataclass, field
-from pathlib import Path
 from typing import Callable, List, Optional
 
-from playwright.sync_api import Page, BrowserContext, TimeoutError as PWTimeout
+from playwright.sync_api import TimeoutError as PWTimeout
 
 
 @dataclass
@@ -57,9 +56,9 @@ class Scenario:
     def step(self, ctx, description: str, fn: Callable[[], None], take_screenshot_on_fail: bool = True):
         """Run a step. fn() should raise on failure (assert ... or check via DOM).
 
-        Шаг не прерывает сценарий: упавшая проверка записывается со скриншотом,
-        и прогон идёт дальше. Одна сломанная кнопка не должна прятать состояние
-        остальных десяти — иначе каждый прогон чинит по одному дефекту за раз.
+        A failed step does not abort the scenario: it is recorded with a screenshot
+        and the run continues. One broken button must not hide the state of the other
+        ten — otherwise every run fixes exactly one defect at a time.
         """
         try:
             fn()
@@ -111,9 +110,8 @@ class Scenario:
                 screenshot=ctx.screenshot(f"FAIL_{self.name}_top"),
             ))
 
-        # Cleanup выполняется всегда — даже если run() упал в середине.
-        # Фикстуры, оставленные после падения, ломают следующий прогон,
-        # и дефект начинает выглядеть плавающим
+        # Cleanup always runs — even if run() died halfway through. Fixtures left
+        # behind after a crash break the next run, and the defect then looks flaky
         try:
             self.cleanup(ctx)
         except Exception as e:

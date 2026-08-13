@@ -5,22 +5,22 @@ import {
   nextStateAfterFailure,
 } from '../src/reliable-delivery/retry-policy';
 
-describe('пауза между попытками', () => {
-  it('растёт вдвое: 1, 2, 4, 8 минут', () => {
+describe('delay between attempts', () => {
+  it('doubles: 1, 2, 4, 8 minutes', () => {
     expect([1, 2, 3, 4].map(backoffMinutes)).toEqual([1, 2, 4, 8]);
   });
 
-  it('упирается в час и дальше не растёт', () => {
+  it('caps at an hour and grows no further', () => {
     expect(backoffMinutes(20)).toBe(MAX_BACKOFF_MINUTES);
   });
 
-  it('первая попытка не ждёт дольше минуты — иначе человек заметит паузу', () => {
+  it('the first retry waits no more than a minute — otherwise the user notices the gap', () => {
     expect(backoffMinutes(1)).toBe(1);
   });
 });
 
-describe('когда сдаваться', () => {
-  it('после неудачи остаётся в очереди и получает время следующей попытки', () => {
+describe('when to give up', () => {
+  it('after a failure the row stays queued and gets a due time', () => {
     const next = nextStateAfterFailure(2);
 
     expect(next.status).toBe('PENDING');
@@ -28,30 +28,30 @@ describe('когда сдаваться', () => {
     expect(next.nextAttemptInMinutes).toBe(4);
   });
 
-  it('на последней попытке переходит в FAILED и больше не повторяется', () => {
+  it('on the last attempt it moves to FAILED and is not retried again', () => {
     const next = nextStateAfterFailure(MAX_ATTEMPTS - 1);
 
     expect(next.status).toBe('FAILED');
     expect(next.nextAttemptInMinutes).toBeNull();
   });
 
-  it('запись в FAILED видна, а не потеряна — её разбирает человек', () => {
-    // Смысл проверки: сдаться можно, потерять нельзя. Статус остаётся
-    // в очереди, и по нему строится сводка «не доставлено N»
+  it('a FAILED row is visible, not lost — a human picks it up', () => {
+    // The point: giving up is allowed, losing the message is not. The row stays
+    // in the queue, and the "N undelivered" summary is built from that status
     const next = nextStateAfterFailure(MAX_ATTEMPTS);
 
     expect(next.status).toBe('FAILED');
     expect(next.attempts).toBeGreaterThan(MAX_ATTEMPTS);
   });
 
-  it('весь цикл повторов укладывается примерно в час', () => {
+  it('the whole retry cycle fits in roughly two hours', () => {
     const total = Array.from({ length: MAX_ATTEMPTS - 1 }, (_, i) => backoffMinutes(i + 1)).reduce(
       (a, b) => a + b,
       0,
     );
 
-    // 1+2+4+8+16+32+60 = 123 минуты. Дольше держать человека в неведении
-    // нельзя, дальше нужен не повтор, а разбор
+    // 1+2+4+8+16+32+60 = 123 minutes. Keeping someone in the dark longer than that
+    // is not acceptable; past this point what is needed is an investigation, not a retry
     expect(total).toBeLessThan(180);
   });
 });

@@ -1,44 +1,44 @@
 import { BadRequestException } from '@nestjs/common';
 
 /**
- * Набор начислений под заявку на вывод.
+ * Selecting accruals for a withdrawal request.
  *
- * Начисления неделимы: каждое — это конкретная закрытая сделка, и вывести
- * «половину сделки» нельзя. Поэтому запрошенная сумма далеко не всегда
- * набирается точно, и весь вопрос в том, что делать в этот момент.
+ * Accruals are indivisible: each one is a specific closed deal, and "half a deal"
+ * cannot be withdrawn. So a requested amount rarely adds up exactly, and the whole
+ * question is what to do at that moment.
  *
- * Раньше запрос на 349 090 000 при доступных 348 090 000 молча создавал
- * заявку на меньшую сумму — и экран честно писал «заявка принята», хотя
- * принята была другая. Для минимальной суммы мы отказ объясняли цифрами,
- * а здесь подменяли молча: одно и то же правило вело себя по-разному
- * в двух местах.
+ * Previously a request for 349,090,000 against 348,090,000 available silently
+ * created a request for the smaller amount — and the screen truthfully said
+ * "request accepted", when a different request had been accepted. For the minimum
+ * amount we explained the refusal with numbers; here we substituted silently. One
+ * rule, behaving differently in two places.
  *
- * Человек не должен узнавать об изменении своей суммы из выписки.
+ * Nobody should learn their amount changed by reading a statement.
  *
- * ── Замечание о происхождении кода ───────────────────────────────────────
- * В продукте этот расчёт живёт внутри сервиса, вместе с транзакцией базы
- * и сохранением заявки. Здесь он вынесен в чистую функцию — без базы, без
- * репозиториев, — чтобы правило можно было проверить тестами. Сам расчёт
- * и тексты ошибок не изменены.
+ * ── A note on where this code comes from ─────────────────────────────────────
+ * In the product this calculation lives inside a service, together with the
+ * database transaction and saving the request. Here it is extracted into a pure
+ * function — no database, no repositories — so the rule can be covered by tests.
+ * The calculation and the error messages are unchanged (translated from Russian).
  */
 
 export interface Accrual {
   id: string;
-  /** Сумма начисления в сумах, целое */
+  /** Accrual amount in UZS, integer */
   amount: number;
 }
 
 export interface SelectionResult {
-  /** Какие именно начисления попадут в заявку */
+  /** Which accruals go into the request */
   chosen: Accrual[];
-  /** Их сумма — она и станет суммой заявки */
+  /** Their total — this becomes the amount of the request */
   sum: number;
 }
 
 /**
- * @param available   доступные начисления
- * @param requested   сколько просит человек; `undefined` — «всё доступное»
- * @param minAmount   минимальная сумма вывода
+ * @param available   accruals available for withdrawal
+ * @param requested   how much the person asks for; `undefined` means "everything available"
+ * @param minAmount   minimum withdrawal amount
  */
 export function selectAccruals(
   available: Accrual[],
@@ -48,12 +48,12 @@ export function selectAccruals(
   const total = available.reduce((acc, t) => acc + Number(t.amount), 0);
 
   if (total === 0) {
-    throw new BadRequestException('Нет начислений к выплате');
+    throw new BadRequestException('Nothing accrued to pay out');
   }
 
   const target = requested ?? total;
 
-  // Набираем целыми начислениями
+  // Filling up with whole accruals
   const chosen: Accrual[] = [];
   let sum = 0;
   for (const t of available) {
@@ -66,22 +66,22 @@ export function selectAccruals(
   if (sum === 0) {
     const smallest = Math.min(...available.map((t) => Number(t.amount)));
     throw new BadRequestException(
-      `Начисления не дробятся: минимальное составляет ${smallest} сум, запрошено ${target}`,
+      `Accruals are indivisible: the smallest one is ${smallest} UZS, requested ${target}`,
     );
   }
 
   if (sum < minAmount) {
     throw new BadRequestException(
-      `Минимальная сумма вывода — ${minAmount} сум, доступно ${sum}`,
+      `Minimum withdrawal is ${minAmount} UZS, available ${sum}`,
     );
   }
 
-  // Расхождение не проглатывается: заявка либо на ту сумму, которую
-  // назвал человек, либо её нет вовсе — с объяснением, что набирается
+  // The discrepancy is not swallowed: either the request is for the amount the
+  // person named, or there is no request at all — with an explanation of what does add up
   if (requested !== undefined && sum !== requested) {
     throw new BadRequestException(
-      `Доступно к выводу ${total} сум, целыми начислениями набирается ${sum}. ` +
-        `Запросите ${sum} или оставьте сумму пустой, чтобы вывести всё доступное.`,
+      `Available for withdrawal: ${total} UZS, whole accruals add up to ${sum}. ` +
+        `Request ${sum}, or leave the amount empty to withdraw everything available.`,
     );
   }
 

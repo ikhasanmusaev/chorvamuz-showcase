@@ -1,14 +1,12 @@
-"""Пример сценария: проверка платного действия глазами пользователя.
+"""Example scenario: verifying a paid action through the user's eyes.
 
-Показывает принцип, ради которого написан весь фреймворк: доказательством
-работы считается только то, что видно на экране. API здесь используется
-дважды — узнать состояние ДО и убрать за собой ПОСЛЕ, — и ни разу для
-вывода «работает».
+Demonstrates the principle the whole framework exists for: only what is visible on
+screen counts as proof that a feature works. The API is used twice here — to read
+the state BEFORE and to clean up AFTER — and never to conclude "it works".
 
-Именно это различие ловило дефекты, которые API-проверки пропускали:
-сервер отвечал `200 OK` и менял статус в базе, а кнопка на экране
-оставалась неактивной. С точки зрения API — успех. С точки зрения
-человека — функция не работает.
+That distinction is exactly what caught defects API-level checks missed: the server
+answered 200 OK and updated the row, while the button on screen stayed disabled.
+From the API's point of view, success. From the user's, a broken feature.
 """
 import sys
 import time
@@ -22,19 +20,19 @@ import helpers as H
 
 class PaidActionFlow(Scenario):
     name = "paid_action_flow"
-    feature = "Оплаченное действие доходит до экрана, а не только до базы"
+    feature = "A paid action reaches the screen, not just the database"
     required_role = "user"
 
     def setup(self, ctx):
-        # Состояние ДО — чтобы отличить «создалось сейчас» от «было раньше».
-        # Без этого сценарий зелёный на старых данных даже когда создание сломано
+        # State BEFORE — to tell "created just now" from "was already there".
+        # Without it the scenario stays green on old data even when creation is broken
         before = ctx.api_call("GET", "/orders/my")
         self.count_before = len(before.get("json") or []) if before.get("ok") else 0
         self.created_id = ""
 
     def cleanup(self, ctx):
-        # Идемпотентно: повторный вызов на уже удалённом не должен падать,
-        # иначе упавший прогон ломает следующий
+        # Idempotent: calling it again on something already removed must not fail,
+        # or a crashed run breaks the next one
         if self.created_id:
             ctx.api_call("POST", f"/orders/{self.created_id}/cancel")
 
@@ -43,12 +41,12 @@ class PaidActionFlow(Scenario):
         ctx.screenshot("1_catalog")
 
         def catalog_has_items():
-            # Пустой каталог — не «нет данных», а замаскированное падение
-            # загрузки. Проверяем именно наличие карточек
+            # An empty catalog is not "no data" — it is a loading failure in disguise.
+            # So we assert that cards are actually present
             cards = ctx.page.locator('a[href^="/item/"]')
-            assert cards.count() > 0, "Каталог пуст: список не загрузился"
+            assert cards.count() > 0, "Catalog is empty: the list did not load"
 
-        if not self.step(ctx, "Каталог показывает позиции", catalog_has_items):
+        if not self.step(ctx, "Catalog shows items", catalog_has_items):
             return
 
         def open_item():
@@ -56,42 +54,41 @@ class PaidActionFlow(Scenario):
             ctx.page.wait_for_url(lambda u: "/item/" in u, timeout=15000)
             time.sleep(2.0)
 
-        self.step(ctx, "Открыть карточку", open_item)
+        self.step(ctx, "Open an item page", open_item)
         ctx.screenshot("2_item")
 
         def price_is_a_number():
-            # Проверка из реального дефекта: две суммы склеивались строкой
-            # и на экране появлялось «300 000 250 000» вместо сложения.
-            # Ничего не падало — просто человек видел бессмыслицу
+            # A check born from a real defect: two amounts were concatenated as
+            # strings, so the screen showed "300 000 250 000" instead of their sum.
+            # Nothing threw — the user was simply shown nonsense
             body = ctx.page.locator("body").inner_text()
             import re
-            matches = re.findall(r"(\d[\d\s]{4,})\s+(\d[\d\s]{4,})\s*(?:UZS|сум)", body)
-            assert not matches, f"Похоже на склейку сумм вместо сложения: {matches[:2]}"
+            matches = re.findall(r"(\d[\d\s]{4,})\s+(\d[\d\s]{4,})\s*(?:UZS)", body)
+            assert not matches, f"Looks like concatenated amounts instead of a sum: {matches[:2]}"
 
-        self.step(ctx, "Сумма выглядит суммой, а не склейкой строк", price_is_a_number)
+        self.step(ctx, "The total looks like a sum, not concatenated strings", price_is_a_number)
 
         def submit():
-            H.click_button_with_name(ctx, ["Buyurtma berish", "Оформить", "Заказать"])
+            H.click_button_with_name(ctx, ["Buyurtma berish", "Place order"])
             time.sleep(3.0)
 
-        self.step(ctx, "Отправить заказ", submit)
+        self.step(ctx, "Submit the order", submit)
         ctx.screenshot("3_after_submit")
 
         def visible_to_user(ctx=ctx):
-            # Ключевой шаг: заказ должен появиться НА ЭКРАНЕ.
-            # Проверять его через API здесь нельзя — тогда сценарий
-            # подтвердит запись в базе, а не работу функции
+            # The key step: the order must appear ON SCREEN. Checking it through
+            # the API here would confirm a database write, not a working feature
             H.goto(ctx, "/orders")
             H.assert_any_text(
                 ctx,
-                ["Buyurtma", "Заказ"],
-                "Созданный заказ не виден в списке пользователя",
+                ["Buyurtma", "Order"],
+                "The created order is not visible in the user's own list",
             )
 
-        self.step(ctx, "Заказ виден пользователю в его списке", visible_to_user)
+        self.step(ctx, "The order is visible to the user in their list", visible_to_user)
         ctx.screenshot("4_orders")
 
-        # И только теперь — API, чтобы забрать id для cleanup
+        # Only now the API — to pick up the id for cleanup
         after = ctx.api_call("GET", "/orders/my")
         items = after.get("json") or []
         if len(items) > self.count_before and items:

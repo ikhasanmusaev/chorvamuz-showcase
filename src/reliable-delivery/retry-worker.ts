@@ -6,7 +6,7 @@ import { LessThanOrEqual, Repository } from 'typeorm';
 import { NotificationOutbox, OutboxStatus } from './outbox.entity';
 import { nextStateAfterFailure } from './retry-policy';
 
-/** Канал доставки. Интерфейс, а не конкретный клиент — чтобы подменялся в тестах */
+/** Delivery channel. An interface rather than a concrete client, so tests can substitute it */
 export interface NotificationTransport {
   notify(recipientId: number, message: string, meta?: { event?: string }): Promise<void>;
 }
@@ -22,10 +22,11 @@ export class RetryWorker {
   ) {}
 
   /**
-   * Повтор отложенных уведомлений.
+   * Retry of deferred notifications.
    *
-   * Раз в минуту: канал обычно недоступен недолго (перезапуск, деплой),
-   * и держать человека в неведении дольше необходимого незачем.
+   * Once a minute: the channel is usually unavailable only briefly (a restart, a
+   * deploy), and there is no reason to keep the person in the dark any longer
+   * than necessary.
    */
   @Cron(CronExpression.EVERY_MINUTE)
   async retryPending(): Promise<void> {
@@ -41,9 +42,9 @@ export class RetryWorker {
     let sent = 0;
     for (const row of due) {
       try {
-        // При повторе событие восстанавливается из очереди: получатель увидит
-        // то же сообщение с теми же действиями, что и при первой попытке,
-        // а не голый текст без контекста
+        // On a retry the event is restored from the queue: the recipient gets the
+        // same message with the same actions as on the first attempt, rather than
+        // bare text stripped of context
         await this.transport.notify(Number(row.recipientId), row.message, {
           event: row.event ?? undefined,
         });
@@ -59,19 +60,19 @@ export class RetryWorker {
 
         if (next.nextAttemptInMinutes === null) {
           this.logger.error(
-            `Уведомление ${row.id} не доставлено за ${row.attempts} попыток: ${row.lastError}`,
+            `Notification ${row.id} undelivered after ${row.attempts} attempts: ${row.lastError}`,
           );
         } else {
           row.nextAttemptAt = new Date(Date.now() + next.nextAttemptInMinutes * 60_000);
         }
       }
-      // Сохраняем каждую строку отдельно: одна упавшая доставка не должна
-      // откатывать успешные из той же пачки
+      // Each row is saved on its own: one failed delivery must not roll back
+      // the successful ones from the same batch
       await this.outboxRepo.save(row);
     }
 
     if (sent > 0) {
-      this.logger.log(`Повтор уведомлений: доставлено ${sent} из ${due.length}`);
+      this.logger.log(`Notification retry: delivered ${sent} of ${due.length}`);
     }
   }
 }

@@ -1,151 +1,150 @@
-# Chorvam.uz — kod namunalari
+# Chorvam.uz — selected code
 
-*[Русская версия](README.ru.md)*
+Chorvam.uz is a livestock marketplace for Uzbekistan: a Telegram Mini App and a web app.
+The product is under active development and the codebase is closed. What follows is a small
+selection meant to show **how we solve engineering problems** — not what we are building.
 
-Chorvam.uz — O'zbekistondagi chorva bozori uchun platforma: Telegram Mini App va veb.
-Mahsulot ishlab chiqilmoqda, kod bazasi yopiq. Bu yerda kichik tanlanma keltirilgan —
-u **muhandislik masalalarini qanday hal qilishimizni** ko'rsatadi, nimani qurayotganimizni emas.
-
-Uchta hikoya, har biri isbot bilan. Barcha parchalar — mahsulotdagi ishlaydigan kod.
+Three stories, each with proof. Every fragment is working code from the product.
 
 ```
-npm install && npm test        # 15 ta test, ~2 soniya
+npm install && npm test        # 15 tests, ~2 seconds
 ```
 
 ---
 
-## 1. Pul haqidagi bildirishnoma yo'qolishi mumkin emas
+## 1. A notification about money must not disappear
 
-**Nima bo'lgan edi.** Tashqi yetkazish kanali ishlamay qoladi — xabar logga `warn`
-darajasida yoziladi va shu bilan tamom. Odam o'z to'lovi haqida bildirishnoma olmaydi,
-uni tiklashning esa iloji yo'q: logda bir qator, tizimda hech nima.
+**What happened.** The delivery channel goes down, the failure is written to the log at
+`warn` level, and that is the end of it. The person never learns their payment went
+through, and there is nothing left to recover from: one line in a log, nothing in the system.
 
-Xato kanalning ishlamay qolishida emas edi — u har doim ishdan chiqadi. Xato shundaki,
-**log muvaffaqiyat haqida hisobot berardi**: kod istisnosiz ishlab tugadi, «yuborildi»
-ko'rsatkichi o'sdi, odamga esa hech nima yetib bormadi.
+The bug was not that the channel failed — it always will. The bug was that **the log
+reported success**: the code finished without throwing, the "sent" counter went up, and
+nothing reached the human being.
 
-**Nima qildik.** Holatga ega navbat: `PENDING → SENT | FAILED`, urinishlar soni,
-oxirgi xatoning matni, keyingi urinish vaqti.
+**What we did.** A queue with state: `PENDING → SENT | FAILED`, attempt count, the text of
+the last error, and the time of the next attempt.
 
-- [`src/reliable-delivery/outbox.entity.ts`](src/reliable-delivery/outbox.entity.ts) — model
-- [`src/reliable-delivery/retry-policy.ts`](src/reliable-delivery/retry-policy.ts) — qachon takrorlash va qachon to'xtash
-- [`src/reliable-delivery/retry-worker.ts`](src/reliable-delivery/retry-worker.ts) — jadval bo'yicha takrorlash
+- [`src/reliable-delivery/outbox.entity.ts`](src/reliable-delivery/outbox.entity.ts) — the model
+- [`src/reliable-delivery/retry-policy.ts`](src/reliable-delivery/retry-policy.ts) — when to retry and when to stop
+- [`src/reliable-delivery/retry-worker.ts`](src/reliable-delivery/retry-worker.ts) — scheduled retries
 
-**E'tiborga loyiq ikkita yechim:**
+**Two decisions worth noticing:**
 
-Pauza ikki barobar o'sadi (1, 2, 4… daqiqa, eng ko'pi bir soat). Nosozlikning odatiy
-sababi — qabul qiluvchi tomonning qayta ishga tushishi, bu bir necha soniya davom etadi:
-birinchi takror tez bo'lishi kerak, toki odam hech narsani sezmasin. Ammo kanal jiddiy
-ishdan chiqqan bo'lsa, uni har daqiqada urish — tiklanishiga xalaqit berish demakdir.
+The delay doubles (1, 2, 4… minutes, capped at an hour). The usual cause of failure is the
+receiving side restarting, which takes seconds: the first retry has to be fast so the user
+never notices. But if the channel is genuinely down, hammering it every minute keeps it
+from coming back up.
 
-Sakkizta urinishdan so'ng yozuv `FAILED` holatiga o'tadi va **ko'rinib turaveradi**.
-Taslim bo'lish mumkin, yo'qotish mumkin emas: aynan shu holat bo'yicha odam ko'radigan
-«N ta yetkazilmadi» hisoboti quriladi.
+After eight attempts the row moves to `FAILED` and **stays visible**. Giving up is allowed;
+losing the message is not. That status is what the "N undelivered" summary is built from —
+the one a human actually looks at.
 
-**Isbot:** [`tests/retry-policy.spec.ts`](tests/retry-policy.spec.ts) — 7 ta test, shu
-jumladan takrorlash tsikli taxminan ikki soatga sig'ishini tekshiruvchi test. Odamni
-bundan uzoqroq xabarsiz qoldirib bo'lmaydi: undan keyin takror emas, tahlil kerak.
+**Proof:** [`tests/retry-policy.spec.ts`](tests/retry-policy.spec.ts) — 7 tests, including
+one asserting the whole retry cycle fits in roughly two hours. Leaving someone in the dark
+longer than that is not acceptable: past that point what is needed is an investigation,
+not another retry.
 
 ---
 
-## 2. Odam o'z summasi o'zgarganini bank ko'chirmasidan bilmasligi kerak
+## 2. Nobody should learn their amount changed by reading a statement
 
-**Nima bo'lgan edi.** Hisoblangan summalar bo'linmaydi: har biri — yopilgan bitim,
-«bitimning yarmini» yechib bo'lmaydi. Shu sababli so'ralgan summa har doim ham aniq
-to'planavermaydi.
+**What happened.** Accruals are indivisible: each one is a closed deal, and you cannot
+withdraw half a deal. So a requested amount does not always add up exactly.
 
-348 090 000 mavjud bo'lganda 349 090 000 so'ralsa, tizim **jimgina kichikroq summaga
-ariza yaratardi**. Ekran esa halol qilib «ariza qabul qilindi» deb yozardi — qabul
-qilingani boshqa ariza edi. Hech nima ishdan chiqmasdi, loglarda hech qanday xato yo'q edi.
+A request for 349,090,000 against 348,090,000 available would **silently create a request
+for the smaller amount**. The screen then truthfully said "request accepted" — a different
+request had been accepted. Nothing threw, nothing appeared in the logs.
 
-Alohida yoqimsiz jihati: yonginasida, eng kam summa tekshiruvida xuddi shu qoida to'g'ri
-ishlardi — rad etardi va raqamlar bilan tushuntirardi. Bitta qoida, ikkita amalga oshirish,
-turlicha xatti-harakat — bu biz o'zimizda bir necha marta uchratgan nuqson turi.
+What makes it worse: right next to it, the minimum-amount check handled the same situation
+correctly — it refused and explained with numbers. One rule, two implementations, two
+behaviours. That is a defect class we have caught in our own code more than once.
 
-**Nima qildik.** Nomuvofiqlik endi yutib yuborilmaydi: ariza yo odam aytgan summaga
-tuziladi, yo umuman tuzilmaydi — aynan qancha to'planishi va nima qilish kerakligi
-tushuntirilgan holda.
+**What we did.** The discrepancy is no longer swallowed: either the request is for the
+amount the person asked for, or there is no request at all — with an explanation of what
+does add up and what to do about it.
 
 - [`src/payouts/accrual-selection.ts`](src/payouts/accrual-selection.ts)
 
-**Isbot:** [`tests/accrual-selection.spec.ts`](tests/accrual-selection.spec.ts) — 8 ta test,
-shu jumladan o'sha 349 090 000 holati va rad javobida **ikkala** raqam — mavjud va
-to'planadigan summa — borligini tekshirish. Odamga nima qilishni tushunish uchun bittasi
-yetarli emas.
+**Proof:** [`tests/accrual-selection.spec.ts`](tests/accrual-selection.spec.ts) — 8 tests,
+including that exact 349,090,000 case and an assertion that the refusal message contains
+**both** numbers, available and attainable. One of them alone does not tell the person what
+to do next.
 
 ---
 
-## 3. Serverning javobini emas, odam ko'rgan narsani tekshiramiz
+## 3. We verify what the user sees, not what the server answered
 
-API tekshiruvlari butunlay o'tkazib yuboradigan nuqsonlar:
+Defects that API-level checks miss entirely:
 
-- server `200 OK` javob beradi va bazada holatni o'zgartiradi, ekrandagi tugma esa
-  faolsiz qolaveradi — API nuqtai nazaridan muvaffaqiyat, odam nuqtai nazaridan
-  funksiya ishlamaydi;
-- ikkita summa satr sifatida qo'shiladi va `550 000` o'rniga ekranda `300 000 250 000`
-  paydo bo'ladi — na bitta istisno, na logda bitta yozuv;
-- ro'yxat bo'sh, lekin ma'lumot yo'qligidan emas, yuklash ishdan chiqqanidan —
-  bo'sh holat qulashni yashiradi.
+- the server returns `200 OK` and updates the row, while the button on screen stays
+  disabled — success as far as the API is concerned, a broken feature as far as the
+  person is concerned;
+- two amounts get concatenated as strings, so instead of `550,000` the screen shows
+  `300,000 250,000` — not one exception, not one log line;
+- a list is empty not because there is no data but because loading failed — the empty
+  state disguises the crash.
 
-**Freymvork qoidasi:** ishlayotganining isboti deb faqat ekranda ko'ringan narsa
-hisoblanadi. API roppa-rosa ikki marta chaqiriladi — holatni **oldin** bilish va
-fiksturalarni **keyin** tozalash uchun, — va hech qachon «ishlayapti» degan xulosa uchun emas.
+**The rule of this framework:** only what is visible on screen counts as proof that a
+feature works. The API is called exactly twice — to read the state **before** and to clean
+up fixtures **after** — and never to conclude "it works".
 
-- [`browser-checks/base.py`](browser-checks/base.py) — bosqichlar, qulaganda skrinshot
-- [`browser-checks/helpers.py`](browser-checks/helpers.py) — CSS-klass bo'yicha emas, rol va yozuv bo'yicha qidiruv
-- [`browser-checks/example_scenario.py`](browser-checks/example_scenario.py) — to'liq stsenariy
+- [`browser-checks/base.py`](browser-checks/base.py) — steps, screenshot on failure
+- [`browser-checks/helpers.py`](browser-checks/helpers.py) — selectors by role and label, not by CSS class
+- [`browser-checks/example_scenario.py`](browser-checks/example_scenario.py) — a full scenario
 
-Qulagan bosqich stsenariyni to'xtatmaydi: bitta buzilgan tugma qolgan o'ntasining
-holatini yashirmasligi kerak, aks holda har bir tekshiruv bittadan nuqson tuzatadi.
+A failed step does not abort the scenario: one broken button must not hide the state of the
+other ten, or every run fixes exactly one defect at a time.
 
 ---
 
-## Qo'shimcha: hozir qaysi build javob bermoqda
+## Also: which build is answering right now
 
-Ikki kun ichida testlash uch marta eski koddagi jarayonni tekshirdi, prodga esa hech kim
-qayta yig'magan servis chiqib ketishiga oz qoldi. Ishlayotgan jarayonni keraklisidan
-ajratishning imkoni yo'q edi: tashqaridan ikkalasi bir xil va bir xil ishonchli javob beradi.
+Over two days our testing checked a process running old code three times, and a service
+nobody had rebuilt very nearly went to production. There was no way to tell a live process
+from the right one: from the outside both answer identically, and just as confidently.
 
-`GET /health` commit, branch va yig'ilish vaqtini qaytaradi — har qanday tekshiruvning
-birinchi so'rovi.
+`GET /health` returns the commit, branch and build time — the first request of any check.
 
 - [`src/build-identity/health.controller.ts`](src/build-identity/health.controller.ts)
 - [`src/build-identity/write-build-info.js`](src/build-identity/write-build-info.js)
 
-Butun ish shu nozik jihat uchun qilingan: ma'lumot build'dan **keyin** yoziladi va
-uning yonida yotadi. Git'ni so'rov paytida o'qib bo'lmaydi — u holda `/health` ishchi
-katalogdagi commit'ni ko'rsatardi, jarayon esa eski build'da ishlab turardi, ya'ni
-aynan o'zi uchun yaratilgan holatda yolg'on gapirardi.
+The subtlety the whole thing exists for: the snapshot is written **after** the build and
+lives next to it. Reading git at request time is not an option — `/health` would then report
+the working tree's commit while the process runs an older build, lying in precisely the
+situation it was created for.
 
 ---
 
-## Kod qayerdan olingan
+## About the code in this repository
 
-Parchalar ishlaydigan mahsulotdan olingan. Faqat ikki xil narsa o'zgartirilgan:
+These fragments come from the running product. Exactly three kinds of changes were made:
 
-1. **Yetkazish kanaliga bog'liq nomlar** (`telegramId` → `recipientId`) va ichki vazifa
-   raqamlari — kodni bizning treker'imizsiz o'qish mumkin bo'lishi uchun.
-2. **Takrorlash siyosati va hisoblanmalarni tanlash alohida modullarga ajratilgan.**
-   Mahsulotda ular servislar ichida, baza tranzaksiyasi bilan birga yashaydi. Bu yerda
-   infratuzilmadan ajratilgan — qoidani bazasiz va tarmoqsiz testlar bilan tekshirish
-   mumkin bo'lsin deb. Mantiq va xato matnlari o'zgartirilmagan.
+1. **Names tied to the delivery channel** (`telegramId` → `recipientId`) and internal issue
+   numbers were removed, so the code reads without access to our tracker.
+2. **The retry policy and accrual selection were extracted into separate modules.** In the
+   product they live inside services, together with the database transaction. Here they are
+   separated from infrastructure so the rule can be tested without a database or a network.
+   The logic itself is unchanged.
+3. **Comments and error messages were translated from Russian**, the working language of
+   the team. Wording and meaning were preserved.
 
-Hech nima «chiroyli ko'rinsin» deb qayta yozilmagan: koddagi izohlar mahsulotdagi bilan
-bir xil, shu jumladan bu yechimlar o'sib chiqqan nuqsonlarning tavsifi ham.
+Nothing was rewritten to look better: the comments are the ones we actually keep in the
+product, including the descriptions of the defects these solutions grew out of.
 
-## Bu yerda ataylab yo'q narsalar
+## Deliberately not included
 
-- mahsulot asosidagi biznes-qoidalar va chegaralar;
-- komissiya modeli va pulning ishtirokchilar o'rtasida taqsimlanishi;
-- to'lov tizimlari bilan integratsiyalar;
-- rollar va kirish huquqlari mantiqi;
-- investitsiya qismi.
+- the business rules and thresholds the product rests on;
+- the commission model and how money is split between participants;
+- payment provider integrations;
+- roles and access control;
+- the investment side of the product.
 
-Bu tanlashdagi e'tiborsizlik emas: sanab o'tilganlar mahsulotning mohiyatini tashkil
-qiladi va ochiq nashr etish uni butunlay berib yuborish degani bo'lardi. Bu modullarning
-istalganini shaxsiy uchrashuvda ko'rsatishga tayyormiz.
+This is not carelessness in selection: the above is the substance of the product, and
+publishing it openly would mean giving that substance away. We are glad to walk through any
+of these modules in person.
 
-## Litsenziya
+## License
 
-Kod tanlov arizasi doirasida faqat tanishish uchun nashr etilgan. Barcha huquqlar
-himoyalangan — [LICENSE](LICENSE) ga qarang.
+Published for review as part of a competition application. All rights reserved — see
+[LICENSE](LICENSE).

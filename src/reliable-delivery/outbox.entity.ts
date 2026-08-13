@@ -8,27 +8,27 @@ import {
 } from 'typeorm';
 
 export enum OutboxStatus {
-  /** Ждёт отправки или следующей попытки */
+  /** Waiting to be sent, or waiting for the next attempt */
   PENDING = 'PENDING',
-  /** Доставлено */
+  /** Delivered */
   SENT = 'SENT',
-  /** Попытки исчерпаны — дальше разбирается человек */
+  /** Attempts exhausted — a human takes it from here */
   FAILED = 'FAILED',
 }
 
 /**
- * Очередь исходящих уведомлений.
+ * Outgoing notification queue.
  *
- * Раньше недоступность внешнего канала писалась в `warn` и на этом всё
- * заканчивалось: человек не получал сообщение о своих деньгах, и восстановить
- * это было нечем — в логе строка, в системе ничего. Уведомление о платеже
- * не может исчезать оттого, что принимающий процесс в момент отправки
- * перезапускался.
+ * Previously an unavailable delivery channel was written to `warn` and that was
+ * the end of it: the person never received the message about their own money,
+ * and there was nothing left to recover from — one line in a log, nothing in the
+ * system. A notification about a payment cannot vanish because the receiving
+ * process happened to be restarting at that moment.
  *
- * Теперь неотправленное лежит здесь и повторяется по расписанию.
+ * Now whatever was not delivered sits here and is retried on a schedule.
  */
 @Entity('notification_outbox')
-// Планировщик выбирает готовые к повтору — по статусу и времени следующей попытки
+// The scheduler picks rows ready for another attempt — by status and due time
 @Index(['status', 'nextAttemptAt'])
 export class NotificationOutbox {
   @PrimaryGeneratedColumn('uuid')
@@ -40,7 +40,7 @@ export class NotificationOutbox {
   @Column({ type: 'text' })
   message: string;
 
-  /** Что произошло — принимающей стороне для выбора действий под сообщением */
+  /** What happened — lets the receiving side pick the actions shown under the message */
   @Column({ type: 'varchar', length: 64, nullable: true })
   event: string | null;
 
@@ -50,7 +50,7 @@ export class NotificationOutbox {
   @Column({ type: 'int', default: 0 })
   attempts: number;
 
-  /** Текст последней ошибки — по нему видно, канал лежит или тело кривое */
+  /** Text of the last error — tells apart "channel is down" from "malformed payload" */
   @Column({ name: 'last_error', type: 'varchar', length: 500, nullable: true })
   lastError: string | null;
 

@@ -12,22 +12,22 @@ interface BuildInfo {
 }
 
 /**
- * «Кто я и какой билд» — первым запросом любой проверки.
+ * "Who am I and which build is this" — the first request of any check.
  *
- * За два дня тестирование трижды проверяло процесс со старым кодом, прогон
- * шёл против старой сборки, а на прод чуть не уехал сервис, который никто
- * не пересобрал. Отличить живой процесс от нужного было нечем: снаружи оба
- * отвечают одинаково и одинаково бодро.
+ * Over two days our testing checked a process running old code three times, a test
+ * run went against a stale build, and a service nobody had rebuilt very nearly went
+ * to production. There was no way to tell a live process from the right one: from
+ * the outside both answer identically, and just as confidently.
  *
- * Данные берутся из `dist/build-info.json`, который пишется ПОСЛЕ сборки.
- * Читать git в момент запроса нельзя: тогда health показывал бы коммит
- * рабочего дерева, пока процесс крутит старую сборку, — и врал бы ровно
- * в том случае, ради которого заведён.
+ * The data comes from `dist/build-info.json`, written AFTER the build. Reading git
+ * at request time is not an option: `/health` would then report the working tree's
+ * commit — that is, the new code — while the process runs an older build, lying in
+ * precisely the situation this endpoint exists for.
  */
 @ApiTags('health')
 @Controller('health')
 export class HealthController {
-  /** Момент старта процесса, а не первого запроса */
+  /** The moment the process started, not the moment of the first request */
   private readonly startedAt = new Date().toISOString();
   private readonly build: BuildInfo;
 
@@ -36,10 +36,10 @@ export class HealthController {
   }
 
   @Get()
-  // Проверка доступности не должна упираться в лимит запросов:
-  // мониторинг дёргает её часто и по расписанию
+  // An availability check must not run into the rate limiter:
+  // monitoring calls it often and on a schedule
   @SkipThrottle()
-  @ApiOperation({ summary: 'Кто отвечает и какой сборкой' })
+  @ApiOperation({ summary: 'Who is answering, and from which build' })
   check() {
     return {
       service: 'api',
@@ -55,10 +55,10 @@ export class HealthController {
   }
 
   /**
-   * Файл лежит рядом со скомпилированным кодом. Нет файла — значит запущено
-   * не из сборки (ts-node в разработке) или сборка старая: говорим `unknown`
-   * честно, а не подставляем текущий git, который к этому процессу
-   * отношения не имеет.
+   * The file sits next to the compiled code. No file means this was not started
+   * from a build (ts-node in development) or the build is stale: we honestly say
+   * `unknown` rather than substituting the current git state, which has nothing
+   * to do with this process.
    */
   private readBuildInfo(): BuildInfo {
     const unknown: BuildInfo = {

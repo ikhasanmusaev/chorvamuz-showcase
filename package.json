@@ -2,7 +2,7 @@
   "name": "chorvam-showcase",
   "version": "1.0.0",
   "private": true,
-  "description": "Отобранные фрагменты кода Chorvam.uz",
+  "description": "Selected code from the Chorvam.uz project",
   "scripts": {
     "test": "jest"
   },

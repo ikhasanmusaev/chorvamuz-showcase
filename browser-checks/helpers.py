@@ -7,10 +7,10 @@ Rule: always prefer semantic / accessibility-based selectors:
   - get_by_placeholder(text)
 Use raw CSS only as a fallback when no semantic selector is possible.
 
-Причина не в чистоте кода: селектор по классу Tailwind ломается от любой
-правки вёрстки и при этом ничего не проверяет. Селектор по роли и названию
-кнопки ломается тогда, когда кнопка действительно исчезла или переименована —
-то есть тогда, когда должен.
+The reason is not code cleanliness: a selector bound to a Tailwind class breaks on
+any markup change while verifying nothing. A selector bound to a role and a button
+label breaks when the button has actually disappeared or been renamed — that is,
+when it should.
 """
 from __future__ import annotations
 
@@ -28,9 +28,9 @@ def goto(ctx, route: str, wait_until="networkidle"):
 def _normalize(s: str) -> str:
     """Lowercase + normalize curly apostrophes.
 
-    В узбекской латинице апостроф — часть буквы (Bo'sh, To'lov), и редакторы
-    подставляют то прямой, то типографский. Без нормализации проверка текста
-    падает на символе, которого человек на экране не различает.
+    In Uzbek Latin script the apostrophe is part of a letter (Bo'sh, To'lov), and
+    editors insert either a straight or a typographic one. Without normalization a
+    text check fails on a character the user cannot tell apart on screen.
     """
     return (s or "").lower().replace("’", "'").replace("‘", "'").replace("`", "'")
 
@@ -61,9 +61,9 @@ def assert_text_visible(ctx, text: str, timeout_ms: int = 5000):
 def click_button_with_name(ctx, names: Sequence[str], scope: Optional[Locator] = None) -> Locator:
     """Click a button matching any of the given names. Returns the locator clicked.
 
-    Список названий, а не одно: интерфейс двуязычный и формулировки меняются.
-    Проверяем, что действие доступно человеку, а не что подпись совпала
-    буква в букву.
+    A list of names rather than one: the interface is bilingual and wording changes.
+    We verify that the action is available to the user, not that a label matched
+    letter for letter.
     """
     root = scope or ctx.page
     for name in names:
